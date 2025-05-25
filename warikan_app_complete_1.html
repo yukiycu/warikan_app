@@ -1,0 +1,276 @@
+<!DOCTYPE html> <!-- このページはHTML5で書かれていることを宣言 -->
+<html lang="ja"> <!-- ページの言語設定：日本語 -->
+<head> <!-- このページはHTML5で書かれていることを宣言 --> 
+  <meta charset="UTF-8"> <!-- 文字エンコーディング：UTF-8（日本語対応） -->
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"> <!-- スマホで見やすくするための設定 -->
+  <title>割り勘app minori</title> <!-- ブラウザタブのタイトル -->
+
+  <!-- 外部CSSライブラリ（Materialize）を読み込む -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+  <!-- Googleのアイコンフォント -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+  <!-- ページ内スタイル定義 -->
+  <style>
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { flex: 1 0 auto; }
+    .checkbox-grid { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .chip .close { cursor: pointer; }
+    .history-card { margin-bottom: .6rem; }
+  </style>
+</head>
+
+<body>
+<script>
+  const CORRECT_PASSWORD = "minori"; // パスワード
+
+  // ローカルストレージにパス済みフラグがあるか確認
+  const isAuthorized = localStorage.getItem("authorized");
+
+  // なければパスワードを聞く
+  if (isAuthorized !== "true") {
+    const input = prompt("パスワードを入力してください");
+    if (input === CORRECT_PASSWORD) {
+      localStorage.setItem("authorized", "true"); // 認証済みとして保存
+    } else {
+      document.body.innerHTML = "<h1>アクセス拒否</h1>";
+    }
+  }
+</script>
+<header>
+  <nav class="blue">
+    <div class="nav-wrapper container">
+      <a href="#" class="brand-logo">割り勘 minori</a>
+    </div>
+  </nav>
+</header>
+
+
+<main class="container">
+  <h5>登録者管理</h5>
+  <form id="pForm" class="row">
+    <div class="input-field col s9 m10">
+      <input id="pName" required>
+      <label for="pName">名前</label>
+    </div>
+    <div class="col s3 m2 center">
+      <button class="btn waves-effect" type="submit">追加</button>
+    </div>
+  </form>
+  <div id="chips" class="section"></div>
+  <div class="divider"></div>
+
+  <h5>会計登録</h5>
+  <form id="tForm">
+    <div class="row">
+      <div class="input-field col s6">
+        <input id="amount" type="number" min="0" step="0.01" required>
+        <label for="amount">金額 (¥)</label>
+      </div>
+      <div class="input-field col s6">
+        <input id="desc">
+        <label for="desc">メモ</label>
+      </div>
+    </div>
+    <div class="row">
+      <div class="input-field col s6">
+        <select id="payer"></select>
+        <label>支払者</label>
+      </div>
+      <div class="input-field col s6">
+        <select id="round">
+          <option value="ceil">切り上げ</option>
+          <option value="floor">切り下げ</option>
+          <option value="round" selected>四捨五入</option>
+        </select>
+        <label>端数処理</label>
+      </div>
+    </div>
+    <p class="grey-text">割り勘対象者 (チェック＝含める／空=全員＋支払者)</p>
+    <div id="targets" class="checkbox-grid"></div>
+    <button class="btn waves-effect" type="submit">登録<i class="material-icons right">receipt</i></button>
+  </form>
+
+  <h6>会計履歴</h6>
+  <div id="history"></div>
+
+  <h6>最新精算</h6>
+  <div id="summary" class="card teal lighten-5" style="display:none;">
+    <div class="card-content" id="summaryContent"></div>
+  </div>
+</main>
+
+<footer class="page-footer blue">
+  <div class="footer-copywright">
+    <div class="container center-align">© 2025 割り勘マネージャー</div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+
+<script>
+const qs = s => document.querySelector(s);
+const qsa = s => [...document.querySelectorAll(s)];
+const round = (m, v) => m === 'ceil' ? Math.ceil(v) : m === 'floor' ? Math.floor(v) : Math.round(v);
+
+const LS_P = 'participants_v2', LS_H = 'history_v2';
+let participants = JSON.parse(localStorage.getItem(LS_P) || '[]');
+let history = JSON.parse(localStorage.getItem(LS_H) || '[]');
+
+function save() {
+  localStorage.setItem(LS_P, JSON.stringify(participants));
+  localStorage.setItem(LS_H, JSON.stringify(history));
+}
+
+function renderChips() {
+  const area = qs('#chips');
+  area.innerHTML = '';
+  participants.forEach((n, i) => {
+    area.insertAdjacentHTML('beforeend', `<div class="chip">${n}<i class="close material-icons">close</i></div>`);
+    area.lastElementChild.querySelector('.close').onclick = () => {
+      participants.splice(i, 1);
+      save();
+      renderAll();
+    };
+  });
+}
+
+function renderSelects() {
+  const sel = qs('#payer');
+  sel.innerHTML = '';
+  participants.forEach(n => sel.insertAdjacentHTML('beforeend', `<option value="${n}">${n}</option>`));
+  M.FormSelect.init(sel);
+}
+
+function renderTargets() {
+  const area = qs('#targets');
+  area.innerHTML = '';
+  participants.forEach(n => area.insertAdjacentHTML('beforeend', `<label><input type="checkbox" class="filled-in" value="${n}"><span>${n}</span></label>`));
+}
+
+function renderHistory() {
+  const container = qs('#history');
+  container.innerHTML = '';
+  history.forEach(h => {
+    container.insertAdjacentHTML('beforeend', `
+      <div class="card white history-card">
+        <div class="card-content">
+          <span class="card-title">${h.desc || '会計'}<small class="grey-text"> (${h.time})</small></span>
+          <p>支払者: <strong>${h.payer}</strong></p>
+          <p>対象者: ${h.targets.join(', ')}</p>
+          <p>金額: ¥${h.amt.toLocaleString()} / 1人: ¥${h.per.toLocaleString()}</p>
+        </div>
+      </div>`);
+  });
+}
+
+function balances() {
+  const bal = {};
+  participants.forEach(p => bal[p] = 0);
+  history.forEach(h => {
+    h.targets.forEach(p => bal[p] -= h.per);
+    bal[h.payer] += h.amt;
+  });
+  return bal;
+}
+
+function renderSummary() {
+  const bal = balances();
+  const debt = [], cred = [];
+
+  Object.entries(bal).forEach(([p, v]) => {
+    if (v < 0) debt.push([p, v]);
+    else if (v > 0) cred.push([p, v]);
+  });
+
+  debt.sort((a, b) => a[1] - b[1]);
+  cred.sort((a, b) => b[1] - a[1]);
+
+  const lines = [];
+  let i = 0, j = 0;
+
+  while (i < debt.length && j < cred.length) {
+    let [dn, dv] = debt[i], [cn, cv] = cred[j];
+    const pay = Math.min(-dv, cv);
+    if (pay) {
+      lines.push(`${dn} → ${cn}: ¥${pay.toLocaleString()}`);
+      dv += pay;
+      cv -= pay;
+      debt[i][1] = dv;
+      cred[j][1] = cv;
+    }
+    if (dv === 0) i++;
+    if (cv === 0) j++;
+  }
+
+  const card = qs('#summary');
+  if (lines.length) {
+    qs('#summaryContent').innerHTML = lines.join('<br>');
+    card.style.display = 'block';
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+function renderAll() {
+  renderChips();
+  renderSelects();
+  renderTargets();
+  renderHistory();
+  renderSummary();
+}
+
+qs('#pForm').onsubmit = e => {
+  e.preventDefault();
+  const name = qs('#pName').value.trim();
+  if (name && !participants.includes(name)) {
+    participants.push(name);
+    save();
+    renderAll();
+  }
+  qs('#pName').value = '';
+  M.updateTextFields();
+};
+
+qs('#tForm').onsubmit = e => {
+  e.preventDefault();
+  const amt = Number(qs('#amount').value);
+  if (!amt) return;
+
+  const payer = qs('#payer').value;
+  if (!payer) {
+    M.toast({ text: '支払者を選択', classes: 'red' });
+    return;
+  }
+
+  const rnd = qs('#round').value;
+  const desc = qs('#desc').value.trim();
+  let targets = qsa('#targets input:checked').map(cb => cb.value);
+  if (!targets.length) targets = [...participants];
+  if (!targets.includes(payer)) targets.push(payer);
+
+  const per = round(rnd, amt / targets.length);
+  history.push({
+    time: new Date().toLocaleString(),
+    payer,
+    targets,
+    per,
+    desc,
+    amt
+  });
+
+  save();
+  renderHistory();
+  renderSummary();
+  qs('#tForm').reset();
+  M.FormSelect.init(qs('#payer'));
+  M.FormSelect.init(qs('#round'));
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  M.FormSelect.init(qsa('select'));
+  renderAll();
+});
+</script>
+</body>
+</html>

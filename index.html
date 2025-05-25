@@ -32,8 +32,7 @@
     const input = prompt("パスワードを入力してください");
     if (input === CORRECT_PASSWORD) {
       localStorage.setItem("authorized", "true"); // 認証済みとして保存
-    }
-    else {
+    } else {
       alert("パスワードが違います");
       window.location.href = "https://minori-app.com"; // 認証失敗時のリダイレクト
     }
